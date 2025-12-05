@@ -3,12 +3,20 @@
   "type": "module",
   "version": "0.0.1",
   "scripts": {
-    "dev": "astro dev",
+    "dev": "astro dev --host",
     "build": "astro build",
     "preview": "astro preview",
+    "toolbar-d": "astro preferences disable devToolbar",
+    "toolbar-e": "astro preferences enable devToolbar",
     "astro": "astro",
     "format": "biome format --write ./"
   },
+  "browserslist": [
+    "last 2 versions",
+    "android >= 10",
+    "iOS >= 16",
+    "not dead"
+  ],
   "dependencies": {
     "astro": "^5.16.4"
   },

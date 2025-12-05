@@ -1,5 +1,20 @@
 {
   "extends": "astro/tsconfigs/strict",
-  "include": [".astro/types.d.ts", "**/*"],
-  "exclude": ["dist"]
+  "include": [".astro/types.d.ts", "src/**/*"],
+  "exclude": ["node_modules", "dist", "public"],
+  "compilerOptions": {
+    "baseUrl": ".",
+    "types": ["astro/client"],
+    "typeRoots": ["./src/types", "./node_modules/@types"],
+    "paths": {
+      "@assets/*": ["src/assets/*"],
+      "@components/*": ["src/components/*"],
+      "@constants/*": ["src/constants/*"],
+      "@layouts/*": ["src/layouts/*"],
+      "@sharedTypes/*": ["src/types/*"],
+      "@store/*": ["src/store/*"],
+      "@styles/*": ["src/styles/*"]
+    },
+    "jsx": "preserve"
+  }
 }
