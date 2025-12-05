@@ -1,4 +1,5 @@
 ---
+import Trim from '@components/Trim.astro';
 import Layout from '@layouts/Layout.astro';
 import type { LayoutProps } from '@sharedTypes/index';
 
@@ -9,7 +10,7 @@ const layoutProps: LayoutProps = {
 ---
 
 <Layout {...layoutProps}>
-  index
+  <Trim />
 </Layout>
 
 <style lang="scss">

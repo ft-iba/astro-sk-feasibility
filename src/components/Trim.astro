@@ -1,0 +1,330 @@
+---
+---
+
+<div class="trim">
+  <div class="trim__preview">
+    <canvas class="trim__previewCanvas" id="js-previewCanvas"></canvas>
+    <div class="trim__previewPanel" id="js-previewPanel"></div>
+  </div>
+  <div class="trim__action">
+    <div class="trim__actionItem">
+      <button
+        class="trim__button"
+        id="js-buttonUpload"
+        data-type="upload"
+        type="button"
+      >
+        <span class="trim__buttonLabel">画像ファイルをアップロード</span>
+      </button>
+    </div>
+    <div class="trim__actionItem">
+      <button
+        class="trim__button"
+        id="js-buttonSend"
+        data-type="send"
+        type="button"
+      >
+        <span class="trim__buttonLabel">透過箇所をクリッピング</span>
+      </button>
+    </div>
+  </div>
+  <input
+    class="trim__input"
+    id="js-inputFile"
+    type="file"
+    accept="image/*,text/plain"
+  />
+  <div
+    class="trim__output"
+    id="js-output"
+  >
+    <div class="trim__outputItem">
+      <p class="trim__outputLabel">clip</p>
+      <canvas id="js-clipCanvas" class="trim__outputCanvas"></canvas>
+    </div>
+    <div class="trim__outputItem">
+      <p class="trim__outputLabel">original</p>
+      <canvas id="js-originalCanvas" class="trim__outputCanvas"></canvas>
+    </div>
+  </div>
+</div>
+
+<script>
+import { SITE } from '@constants/index';
+
+const clipCanvas = document.getElementById('js-clipCanvas');
+const inputFile = document.getElementById('js-inputFile');
+const originalCanvas = document.getElementById('js-originalCanvas');
+const previewCanvas = document.getElementById('js-previewCanvas');
+const previewPanel = document.getElementById('js-previewPanel');
+const buttonSend = document.getElementById('js-buttonSend');
+const buttonUpload = document.getElementById('js-buttonUpload');
+
+let original: HTMLCanvasElement | null;
+
+let panelId: number = 1; // コマID TODO: 適切な命名・取得ロジック
+let isUploaded: boolean = false; // 画像アップロード済みか TODO: vanillaでなければ他で成立するので不要、ボタンの状態も変えたい
+const targetSize: number = 800; // TODO: 見開きの時は違うサイズになりそう。縦・横別で保持
+
+/**
+ * 透明ピクセルでトリミングして新しい canvas を返す
+ * @param {HTMLCanvasElement} canvas
+ * @param {number} alphaThreshold - 0..255 のしきい値（デフォルト 0 = 完全に透明のみトリム）
+ */
+function trimTransparent(canvas: HTMLCanvasElement, alphaThreshold = 0) {
+  const w = canvas.width;
+  const h = canvas.height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  const img = ctx.getImageData(0, 0, w, h);
+  const data = img.data;
+
+  let top =
+    h,
+    left = w,
+    right = -1,
+    bottom = -1;
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const idx = (y * w + x) * 4;
+      const alpha = data[idx + 3];
+      if (alpha > alphaThreshold) {
+        if (x < left) left = x;
+        if (x > right) right = x;
+        if (y < top) top = y;
+        if (y > bottom) bottom = y;
+      }
+    }
+  }
+
+  const trimW = right - left + 1;
+  const trimH = bottom - top + 1;
+
+  if (!(clipCanvas instanceof HTMLCanvasElement)) return;
+  clipCanvas.width = trimW;
+  clipCanvas.height = trimH;
+  const clipCtx = clipCanvas.getContext('2d', { willReadFrequently: true });
+  clipCtx?.putImageData(ctx.getImageData(left, top, trimW, trimH), 0, 0);
+}
+
+const getMaskImage = (id: number): string => {
+  const img = `${SITE.BASE}/images/trim/img_mask${id}.png`;
+  return img;
+}
+
+const setPanelIdImage = (id: number): void => {
+  const imgPanel = `${SITE.BASE}/images/trim/img_mask_panel${id}.png`;
+  if (!(previewPanel instanceof HTMLElement)) return;
+  previewPanel.style.backgroundImage = `url(${imgPanel})`;
+}
+
+// TODO: ウィンドウリサイズ対応
+const drawOriginalOnCanvas = async(img: HTMLImageElement): Promise<Blob | undefined> => {
+  // 正方形にトリミング
+  const cropSize = Math.min(img.width, img.height);
+
+  if (!(original instanceof HTMLCanvasElement)) return;
+  original.width = targetSize;
+  original.height = targetSize;
+  const originalCtx = original.getContext('2d');
+  if (!originalCtx) return;
+
+  const offsetX = (img.width - cropSize) / 2;
+  const offsetY = (img.height - cropSize) / 2;
+
+  originalCtx.drawImage(
+    img,
+    offsetX,
+    offsetY,
+    cropSize,
+    cropSize,
+    0,
+    0,
+    targetSize,
+    targetSize
+  );
+  const blob = await drawFileImageOnCanvas();
+  console.log(blob);
+  return blob ?? undefined;
+}
+
+const drawFileImageOnCanvas = async(): Promise<Blob | undefined> => {
+  if (!(previewCanvas instanceof HTMLCanvasElement)) return;
+  const parent = previewCanvas.parentElement;
+  if (!(parent instanceof HTMLElement)) return;
+  const parentWidth = parent.clientWidth;
+  const parentHeight = parent.clientHeight;
+  const dpr = window.devicePixelRatio || 1;
+
+  previewCanvas.style.width = `${parentWidth}px`;
+  previewCanvas.style.height = `${parentHeight}px`;
+
+  previewCanvas.width = parentWidth * dpr;
+  previewCanvas.height = parentHeight * dpr;
+
+  const ctx = previewCanvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return;
+  if (!(original instanceof HTMLCanvasElement)) return;
+
+  ctx.scale(dpr, dpr);
+  ctx.drawImage(original, 0, 0, parentWidth, parentHeight);
+
+  // マスク用画像でトリミング
+  const maskImageSrc = getMaskImage(panelId);
+  const mask = await loadImage(maskImageSrc);
+  ctx.globalCompositeOperation = 'destination-in';
+  ctx.drawImage(mask, 0, 0, parentWidth, parentHeight);
+
+  const blob = await new Promise<Blob | null>((resolve) =>
+    original?.toBlob(resolve, 'image/jpeg', 1)
+  );
+  console.log(blob);
+  return blob ?? undefined;
+};
+
+const loadFileImage = (file: File): Promise<HTMLImageElement> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => resolve(img);
+      img.onerror = reject;
+      if (typeof reader.result !== 'string') return;
+      img.src = reader.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+};
+
+const loadImage = (src: string): Promise<HTMLImageElement> => {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.src = src;
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+  });
+};
+
+// TODO: モックのプレビュー用なのでトル
+const drawOriginalPreviewCanvas = async(): Promise<void> => {
+  console.log('drawOriginalPreviewCanvas', original);
+  if (!(original instanceof HTMLCanvasElement)) return;
+  if (!(originalCanvas instanceof HTMLCanvasElement)) return;
+  const w = original.width;
+  const h = original.height;
+  originalCanvas.width = w;
+  originalCanvas.height = h;
+  const ctx = originalCanvas.getContext('2d');
+  if (!ctx) return;
+  ctx.drawImage(original, 0, 0, w, h);
+}
+
+const handleClickButtonSend = async() => {
+  if (!isUploaded) { // 画像が未アップロード
+    // TODO: モック限定の簡易処理
+    alert('画像をアップロードしてください');
+    return;
+  }
+  console.log('handleClickButtonSend');
+  trimTransparent(previewCanvas as HTMLCanvasElement); // 透明ピクセルをトリム
+  drawOriginalPreviewCanvas();
+}
+
+const handleClickButtonUpload = () => {
+  inputFile?.click();
+}
+
+const handleChangeInputFile = async(event: Event): Promise<void> => {
+  const target = event.target;
+
+  if (!(target instanceof HTMLInputElement)) return;
+  if (!target.files) return;
+
+  const file = target.files[0];
+  const img = await loadFileImage(file);
+  const blob = await drawOriginalOnCanvas(img);
+  isUploaded = true;
+}
+
+document.addEventListener('DOMContentLoaded', (): void => {
+  original = document.createElement('canvas');
+  setPanelIdImage(panelId);
+
+  buttonSend?.addEventListener('click', handleClickButtonSend);
+  buttonUpload?.addEventListener('click', handleClickButtonUpload);
+  inputFile?.addEventListener('change', handleChangeInputFile);
+});
+</script>
+
+<style lang="scss">
+body {
+  background-color: var(--theme-color-base);
+}
+
+.trim {
+  padding: 1rem;
+}
+
+.trim__preview {
+  aspect-ratio: 1;
+  background-color: var(--theme-color-gray);
+  position: relative;
+  width: min(800px, 100%);
+}
+
+.trim__previewPanel,
+.trim__previewCanvas {
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  position: absolute;
+  inset: 0;
+}
+
+.trim__action {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.5rem;
+  margin-top: 1rem;
+  width: min(800px, 100%);
+}
+
+.trim__button {
+  color: var(--theme-color-white);
+  container-type: inline-size;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-top: 1rem;
+  padding-bottom: 1rem;
+  width: 100%;
+  &[data-type="upload"] {
+    background-color: var(--theme-color-black);
+  }
+  &[data-type="send"] {
+    background-color: var(--theme-color-gray);
+  }
+}
+
+.trim__buttonLabel {
+  font-size: min(#{'calc(19 * var(--design-cqw))'}, 14px);
+}
+
+.trim__input {
+  display: none;
+}
+
+.trim__outputItem {
+  margin-top: 1rem;
+  overflow-x: auto;
+  width: 100%;
+}
+
+.trim__outputLabel {
+  font-size: min(#{'calc(19 * var(--design-cqw))'}, 14px);
+}
+</style>
