@@ -15,5 +15,8 @@
     "autoprefixer": "^10.4.22",
     "postcss-preset-env": "^10.5.0",
     "sass-embedded": "^1.93.3"
+  },
+  "volta": {
+    "node": "22.12.0"
   }
 }
